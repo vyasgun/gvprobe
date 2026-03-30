@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/vyasgun/gvprobe/cmd"
+	"github.com/vyasgun/gvprobe/cmd/trace"
 	"github.com/vyasgun/gvprobe/pkg/constants"
 )
 
@@ -23,4 +24,5 @@ func init() {
 	rootCmd.AddCommand(cmd.NewStartCommand())
 	rootCmd.AddCommand(cmd.NewStopCommand())
 	rootCmd.AddCommand(cmd.NewStatusCommand())
+	rootCmd.AddCommand(trace.NewRootCommand())
 }

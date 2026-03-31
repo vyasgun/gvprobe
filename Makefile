@@ -17,3 +17,10 @@ build:
 .PHONY: install
 install:
 	go install -trimpath -ldflags "$(LDFLAGS)" .
+
+lint:
+	go get github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	golangci-lint run ./...
+
+fmt:
+	go fmt ./...

@@ -13,5 +13,6 @@ func NewRootCommand() *cobra.Command {
 		},
 	}
 	rootCmd.AddCommand(NewDhcpCommand())
+	rootCmd.AddCommand(NewArpCommand())
 	return rootCmd
 }

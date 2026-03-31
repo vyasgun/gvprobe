@@ -14,6 +14,7 @@ func NewDefaulCommand() gvproxytypes.GvproxyCommand {
 	cmd.LogFile = constants.GvproxyLogFile
 	cmd.Debug = true
 	cmd.AddVfkitSocket(fmt.Sprintf("unixgram://%s", constants.VfkitSocket))
+	cmd.AddServiceEndpoint(constants.GvproxyURL)
 	return cmd
 }
 

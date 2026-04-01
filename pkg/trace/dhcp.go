@@ -13,6 +13,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/insomniacslk/dhcp/dhcpv4"
+	"github.com/vyasgun/gvprobe/internal/out"
 	"github.com/vyasgun/gvprobe/pkg/constants"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy"
 )
@@ -43,7 +44,7 @@ func TraceDhcp(opts DhcpTraceOpts) error {
 
 	w := os.Stdout
 	if !opts.Machine {
-		fmt.Fprintf(w, "DHCP Trace — MAC: %s (%d requests)\n\n", opts.MAC, opts.Count)
+		out.Fprintf(w, "DHCP Trace — MAC: %s (%d requests)\n\n", opts.MAC, opts.Count)
 	}
 
 	var nReused, nNew, nDone int
@@ -109,11 +110,11 @@ func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Durat
 	if err != nil {
 		if ne, ok := err.(net.Error); ok && ne.Timeout() {
 			if opts.Machine {
-				fmt.Fprintf(w, "\n── inbound (no reply) ──\nno DHCP response within %s\n", readTimeout)
+				out.Fprintf(w, "\n── inbound (no reply) ──\nno DHCP response within %s\n", readTimeout)
 			} else if opts.Count > 1 {
-				fmt.Fprintln(w, "(no reply within timeout)")
+				out.Fprintln(w, "(no reply within timeout)")
 			} else {
-				fmt.Fprintf(w, "\nNo DHCP reply within %s\n", readTimeout)
+				out.Fprintf(w, "\nNo DHCP reply within %s\n", readTimeout)
 			}
 			return false, false, nil
 		}
@@ -144,7 +145,7 @@ func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Durat
 		if foundLease {
 			tag = "Reused"
 		}
-		fmt.Fprintf(w, "[%d] Sent Discover → Offer %s   [%s]\n", run, replyMsg.YourIPAddr, tag)
+		out.Fprintf(w, "[%d] Sent Discover → Offer %s   [%s]\n", run, replyMsg.YourIPAddr, tag)
 		return foundLease, true, nil
 	}
 
@@ -158,7 +159,7 @@ func leaseForMAC(mac string) (found bool, leaseIP string, err error) {
 	if err != nil {
 		return false, "", fmt.Errorf("failed to get leases: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to read leases: %w", err)
@@ -177,21 +178,21 @@ func leaseForMAC(mac string) (found bool, leaseIP string, err error) {
 
 // writeFinalSummary closes human multi-run output (one informative line).
 func writeFinalSummary(w io.Writer, totalReq, nReused, nNew, nDone int) {
-	fmt.Fprintln(w)
+	out.Fprintln(w)
 	if nDone == 0 {
-		fmt.Fprintf(w, "Summary: No DHCP replies received (%d request(s))\n", totalReq)
+		out.Fprintf(w, "Summary: No DHCP replies received (%d request(s))\n", totalReq)
 		return
 	}
 	switch {
 	case nReused == nDone && nNew == 0:
-		fmt.Fprintf(w, "Summary: Lease consistently reused (%d/%d times)\n", nReused, nDone)
+		out.Fprintf(w, "Summary: Lease consistently reused (%d/%d times)\n", nReused, nDone)
 	case nNew == nDone && nReused == 0:
-		fmt.Fprintf(w, "Summary: New lease each time (%d/%d times)\n", nNew, nDone)
+		out.Fprintf(w, "Summary: New lease each time (%d/%d times)\n", nNew, nDone)
 	default:
-		fmt.Fprintf(w, "Summary: Mixed — reused %d, new %d (of %d replies)\n", nReused, nNew, nDone)
+		out.Fprintf(w, "Summary: Mixed — reused %d, new %d (of %d replies)\n", nReused, nNew, nDone)
 	}
 	if nDone < totalReq {
-		fmt.Fprintf(w, "Note: %d request(s) had no reply or timed out\n", totalReq-nDone)
+		out.Fprintf(w, "Note: %d request(s) had no reply or timed out\n", totalReq-nDone)
 	}
 }
 
@@ -256,44 +257,44 @@ func parseDhcpFromEthernet(packet []byte) (*dhcpv4.DHCPv4, error) {
 }
 
 func writeDhcpEthernetTrace(w io.Writer, title string, frame []byte) {
-	fmt.Fprintf(w, "\n-- %s --\n", title)
-	fmt.Fprintf(w, "%d byte(s)\n\n", len(frame))
+	out.Fprintf(w, "\n-- %s --\n", title)
+	out.Fprintf(w, "%d byte(s)\n\n", len(frame))
 
 	pkt := gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default)
 	if errLayer := pkt.ErrorLayer(); errLayer != nil {
-		fmt.Fprintf(w, "(layer decode error: %v)\n\n", errLayer.Error())
+		out.Fprintf(w, "(layer decode error: %v)\n\n", errLayer.Error())
 	}
-	fmt.Fprintln(w, strings.TrimSpace(pkt.String()))
+	out.Fprintln(w, strings.TrimSpace(pkt.String()))
 
 	if d, err := parseDhcpFromEthernet(frame); err == nil {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, d.Summary())
+		out.Fprintln(w)
+		out.Fprintln(w, d.Summary())
 	}
-	fmt.Fprintln(w)
+	out.Fprintln(w)
 }
 
 func writeHumanDiscover(w io.Writer, mac string) {
-	fmt.Fprintln(w, "-> Sent DHCP Discover")
-	fmt.Fprintf(w, "   Client MAC       : %s\n", mac)
-	fmt.Fprintln(w, "   Asking for IP")
+	out.Fprintln(w, "-> Sent DHCP Discover")
+	out.Fprintf(w, "   Client MAC       : %s\n", mac)
+	out.Fprintln(w, "   Asking for IP")
 }
 
 func writeHumanOffer(w io.Writer, msg *dhcpv4.DHCPv4, hadLease bool, priorLeaseIP string) {
-	fmt.Fprintln(w)
-	fmt.Fprintf(w, "-> Received DHCP %s from gvproxy\n", msg.MessageType())
-	fmt.Fprintf(w, "   Offered IP       : %s\n", msg.YourIPAddr)
-	fmt.Fprintf(w, "   Subnet Mask      : %s\n", maskString(msg.SubnetMask()))
-	fmt.Fprintf(w, "   Gateway          : %s\n", firstIP(msg.Router()))
-	fmt.Fprintf(w, "   DNS Server       : %s\n", firstIP(msg.DNS()))
-	fmt.Fprintf(w, "   Lease Time       : %s\n", humanLease(msg.IPAddressLeaseTime(0)))
-	fmt.Fprintf(w, "   Transaction ID   : %s\n", msg.TransactionID.String())
+	out.Fprintln(w)
+	out.Fprintf(w, "-> Received DHCP %s from gvproxy\n", msg.MessageType())
+	out.Fprintf(w, "   Offered IP       : %s\n", msg.YourIPAddr)
+	out.Fprintf(w, "   Subnet Mask      : %s\n", maskString(msg.SubnetMask()))
+	out.Fprintf(w, "   Gateway          : %s\n", firstIP(msg.Router()))
+	out.Fprintf(w, "   DNS Server       : %s\n", firstIP(msg.DNS()))
+	out.Fprintf(w, "   Lease Time       : %s\n", humanLease(msg.IPAddressLeaseTime(0)))
+	out.Fprintf(w, "   Transaction ID   : %s\n", msg.TransactionID.String())
 	if hadLease {
-		fmt.Fprintf(w, "   Lease state      : Reusing existing lease (%s)\n", priorLeaseIP)
+		out.Fprintf(w, "   Lease state      : Reusing existing lease (%s)\n", priorLeaseIP)
 	} else {
-		fmt.Fprintf(w, "   Lease state      : New lease (offered %s)\n", msg.YourIPAddr)
+		out.Fprintf(w, "   Lease state      : New lease (offered %s)\n", msg.YourIPAddr)
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "DHCP handshake successful")
+	out.Fprintln(w)
+	out.Fprintln(w, "DHCP handshake successful")
 }
 
 func firstIP(ips []net.IP) string {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"log"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,10 @@ func NewStartCommand() *cobra.Command {
 			var err error
 			var pid int
 			if pid, err = gvproxy.Start(); err != nil {
+				if errors.Is(err, gvproxy.ErrGvproxyAlreadyRunning) {
+					log.Printf("gvproxy is already running at pid %d", pid)
+					return
+				}
 				log.Fatalf("failed to start gvproxy: %v", err)
 			}
 			log.Printf("gvproxy started with pid: %d", pid)

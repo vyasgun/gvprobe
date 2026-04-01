@@ -9,12 +9,13 @@ import (
 	"github.com/vyasgun/gvprobe/pkg/constants"
 )
 
+var ErrGvproxyAlreadyRunning = errors.New("gvproxy is already running")
+
 func Start() (int, error) {
 	pid, err := readPIDFromFile()
 	if err == nil {
 		if runningGvproxyByPID(pid) {
-			log.Printf("gvproxy is already running at pid %d", pid)
-			return pid, nil
+			return pid, ErrGvproxyAlreadyRunning
 		}
 		log.Printf("removing invalid pid file %s", constants.GvproxyPidFile)
 		_ = os.Remove(constants.GvproxyPidFile)

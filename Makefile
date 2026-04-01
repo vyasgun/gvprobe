@@ -10,6 +10,13 @@ LDFLAGS := \
 	-X '$(VERSION_PKG).Version=$(VERSION)' \
 	-X '$(VERSION_PKG).Commit=$(COMMIT)'
 
+SOURCE_DIRS = cmd pkg test
+
+TOOLS_DIR := tools
+include tools/tools.mk
+
+.DEFAULT_GOAL := build
+
 .PHONY: build
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/gvprobe .
@@ -18,9 +25,10 @@ build:
 install:
 	go install -trimpath -ldflags "$(LDFLAGS)" .
 
-lint:
-	go get github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	golangci-lint run ./...
+.PHONY: lint
+lint: $(TOOLS_BINDIR)/golangci-lint
+	"$(TOOLS_BINDIR)"/golangci-lint run
 
-fmt:
-	go fmt ./...
+.PHONY: fmt
+fmt: $(TOOLS_BINDIR)/goimports
+	@$(TOOLS_BINDIR)/goimports -l -w $(SOURCE_DIRS)

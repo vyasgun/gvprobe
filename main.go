@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"os"
 
 	"github.com/vyasgun/gvprobe/cmd"
@@ -18,7 +19,9 @@ func main() {
 
 func init() {
 	if _, err := os.Stat(constants.GvprobeConfigDir); os.IsNotExist(err) {
-		os.MkdirAll(constants.GvprobeConfigDir, 0755)
+		if err := os.MkdirAll(constants.GvprobeConfigDir, 0755); err != nil {
+			log.Fatalf("failed to create config directory: %v", err)
+		}
 	}
 	rootCmd.AddCommand(cmd.NewVersionCommand())
 	rootCmd.AddCommand(cmd.NewStartCommand())

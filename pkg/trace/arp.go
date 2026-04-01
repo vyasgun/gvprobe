@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/vyasgun/gvprobe/internal/out"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy"
 )
 
@@ -83,7 +84,7 @@ func TraceArp(opts ArpTraceOpts) error {
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				if !opts.Machine {
-					fmt.Fprintf(w, "\nNo ARP reply within %s\n", arpReadTimeout)
+					out.Fprintf(w, "\nNo ARP reply within %s\n", arpReadTimeout)
 					return nil
 				}
 			}
@@ -134,30 +135,30 @@ func parseArpFromEthernet(packet []byte) (*layers.ARP, error) {
 }
 
 func writeHumanArpRequest(w io.Writer, targetIP, sourceMAC string) {
-	fmt.Fprintf(w, "ARP Trace — Target: %s\n\n", targetIP)
-	fmt.Fprintf(w, "Sent ARP Request (Who has %s?)\n", targetIP)
-	fmt.Fprintf(w, "   Source MAC : %s\n", sourceMAC)
+	out.Fprintf(w, "ARP Trace — Target: %s\n\n", targetIP)
+	out.Fprintf(w, "Sent ARP Request (Who has %s?)\n", targetIP)
+	out.Fprintf(w, "   Source MAC : %s\n", sourceMAC)
 }
 
 func writeArpEthernetTrace(w io.Writer, title string, frame []byte) {
-	fmt.Fprintf(w, "\n-- %s --\n", title)
-	fmt.Fprintf(w, "%d byte(s)\n\n", len(frame))
+	out.Fprintf(w, "\n-- %s --\n", title)
+	out.Fprintf(w, "%d byte(s)\n\n", len(frame))
 
 	pkt := gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default)
 	if errLayer := pkt.ErrorLayer(); errLayer != nil {
-		fmt.Fprintf(w, "(layer decode error: %v)\n\n", errLayer.Error())
+		out.Fprintf(w, "(layer decode error: %v)\n\n", errLayer.Error())
 	}
-	fmt.Fprintln(w, strings.TrimSpace(pkt.String()))
+	out.Fprintln(w, strings.TrimSpace(pkt.String()))
 }
 
 func writeHumanArpReply(w io.Writer, replyMsg *layers.ARP) {
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "-> Received ARP Reply")
+	out.Fprintln(w)
+	out.Fprintln(w, "-> Received ARP Reply")
 	// Reply: Sender = responder; Target = original requester (RFC 826).
-	fmt.Fprintf(w, "   Sender MAC      : %s\n", net.HardwareAddr(replyMsg.SourceHwAddress).String())
-	fmt.Fprintf(w, "   Sender IP       : %s\n", net.IP(replyMsg.SourceProtAddress).String())
-	fmt.Fprintf(w, "   Target MAC      : %s\n", net.HardwareAddr(replyMsg.DstHwAddress).String())
-	fmt.Fprintf(w, "   Target IP       : %s  (requester)\n", net.IP(replyMsg.DstProtAddress).String())
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "ARP handshake successful")
+	out.Fprintf(w, "   Sender MAC      : %s\n", net.HardwareAddr(replyMsg.SourceHwAddress).String())
+	out.Fprintf(w, "   Sender IP       : %s\n", net.IP(replyMsg.SourceProtAddress).String())
+	out.Fprintf(w, "   Target MAC      : %s\n", net.HardwareAddr(replyMsg.DstHwAddress).String())
+	out.Fprintf(w, "   Target IP       : %s  (requester)\n", net.IP(replyMsg.DstProtAddress).String())
+	out.Fprintln(w)
+	out.Fprintln(w, "ARP handshake successful")
 }

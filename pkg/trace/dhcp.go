@@ -2,6 +2,7 @@ package trace
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,24 +27,86 @@ type DhcpTraceOpts struct {
 	MAC     string
 	Count   int
 	Machine bool
+	// Quiet suppresses human-oriented trace output (writes to io.Discard).
+	Quiet bool
+}
+type LeaseState string
+
+const (
+	LeaseStateNew     LeaseState = "New"
+	LeaseStateReused  LeaseState = "Reused"
+	LeaseStateError   LeaseState = "Error"
+	LeaseStateTimeout LeaseState = "Timeout"
+)
+
+type DhcpTraceResult struct {
+	MAC        string
+	OfferedIP  string
+	LeaseState LeaseState // "New lease" or "Reusing existing lease"
+	TxID       string
+	Timestamp  time.Time
+	Error      error
+}
+
+// ErrDhcpTimeout is stored in DhcpTraceResult.Error when no reply arrives in time.
+var ErrDhcpTimeout = errors.New("dhcp reply timeout")
+
+// QuietOfferedIP returns the offered IP or "—" for errors or a missing offer (compact output).
+func (r DhcpTraceResult) QuietOfferedIP() string {
+	if r.Error != nil || r.OfferedIP == "" {
+		return "—"
+	}
+	return r.OfferedIP
+}
+
+// QuietLeaseTag returns a short lease/error label for compact output lines.
+func (r DhcpTraceResult) QuietLeaseTag() string {
+	if r.Error != nil {
+		if r.Error == ErrDhcpTimeout {
+			return "Timeout"
+		}
+		return "Error"
+	}
+	switch r.LeaseState {
+	case LeaseStateNew:
+		return "New"
+	case LeaseStateReused:
+		return "Reused"
+	default:
+		if s := string(r.LeaseState); s != "" {
+			return s
+		}
+		return "—"
+	}
+}
+
+// dhcpDiscoverOutcome is one vfkit round-trip: a trace row plus Completed for human-mode summaries.
+type dhcpDiscoverOutcome struct {
+	DhcpTraceResult
+	Completed bool // human mode: DHCP offer parsed (counts toward nDone / reuse tallies)
 }
 
 // TraceDhcp is the main entry point.
-func TraceDhcp(opts DhcpTraceOpts) error {
+func TraceDhcp(opts DhcpTraceOpts) ([]DhcpTraceResult, error) {
 	status, err := gvproxy.Status()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if status != gvproxy.Running {
-		return fmt.Errorf("gvproxy is not running")
+		return nil, fmt.Errorf("gvproxy is not running")
 	}
 
 	if opts.Count < 1 {
 		opts.Count = 1
 	}
 
-	w := os.Stdout
-	if !opts.Machine {
+	suppressHuman := opts.Quiet && !opts.Machine
+	w := io.Writer(os.Stdout)
+	if suppressHuman {
+		w = io.Discard
+	}
+	results := make([]DhcpTraceResult, 0, opts.Count)
+	if !opts.Machine && !suppressHuman {
 		out.Fprintf(w, "DHCP Trace — MAC: %s (%d requests)\n\n", opts.MAC, opts.Count)
 	}
 
@@ -60,38 +123,45 @@ func TraceDhcp(opts DhcpTraceOpts) error {
 				return fmt.Errorf("failed to build Ethernet frame: %w", err)
 			}
 
-			reused, completed, err := dhcpDiscoverRoundTrip(c, frame, dhcpReadTimeout, run, opts, w)
+			trip, err := dhcpDiscoverRoundTrip(c, frame, dhcpReadTimeout, run, opts, w)
 			if err != nil {
 				return err
 			}
-			if !opts.Machine && completed {
+			if !opts.Machine && trip.Completed {
 				nDone++
-				if reused {
+				if trip.LeaseState == LeaseStateReused {
 					nReused++
 				} else {
 					nNew++
 				}
 			}
+			if opts.Machine {
+				continue
+			}
+			if trip.Error != nil || trip.Completed {
+				results = append(results, trip.DhcpTraceResult)
+			}
 		}
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if !opts.Machine && opts.Count > 1 {
+	if !opts.Machine && !suppressHuman && opts.Count > 1 {
 		writeFinalSummary(w, opts.Count, nReused, nNew, nDone)
 	}
-	return nil
+
+	return results, nil
 }
 
-// dhcpDiscoverRoundTrip sends one frame and reads the Offer (or times out).
-// reusedBefore is whether a lease already existed for this MAC before the discover.
-// completed is true when a DHCP reply was decoded successfully.
-func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Duration, run int, opts DhcpTraceOpts, w io.Writer) (reusedBefore bool, completed bool, err error) {
+func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Duration, run int, opts DhcpTraceOpts, w io.Writer) (dhcpDiscoverOutcome, error) {
+	row := DhcpTraceResult{MAC: opts.MAC, Timestamp: time.Now()}
+	var zero dhcpDiscoverOutcome
+
 	foundLease, leaseIP, err := leaseForMAC(opts.MAC)
 	if err != nil {
-		return false, false, err
+		return zero, err
 	}
 
 	if opts.Machine {
@@ -101,7 +171,7 @@ func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Durat
 	}
 
 	if _, err := c.WriteTo(frame, vfkitRemote); err != nil {
-		return false, false, err
+		return zero, err
 	}
 
 	_ = c.SetReadDeadline(time.Now().Add(readTimeout))
@@ -116,29 +186,43 @@ func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Durat
 			} else {
 				out.Fprintf(w, "\nNo DHCP reply within %s\n", readTimeout)
 			}
-			return false, false, nil
+			row.Error = ErrDhcpTimeout
+			row.Timestamp = time.Now()
+			return dhcpDiscoverOutcome{DhcpTraceResult: row, Completed: false}, nil
 		}
-		return false, false, err
+		return zero, err
 	}
 
 	replyMsg, err := parseDhcpFromEthernet(reply[:n])
 	if err != nil {
 		if opts.Machine {
 			writeDhcpEthernetTrace(w, fmt.Sprintf("inbound L2 frame (run %d)", run), reply[:n])
-			return false, true, nil
+			return dhcpDiscoverOutcome{DhcpTraceResult: row, Completed: false}, nil
 		}
-		return false, false, fmt.Errorf("decode DHCP reply: %w", err)
+		return zero, fmt.Errorf("decode DHCP reply: %w", err)
 	}
 
 	if opts.Machine {
 		writeDhcpEthernetTrace(w, fmt.Sprintf("inbound L2 frame (run %d)", run), reply[:n])
-		return false, true, nil
+		row.OfferedIP = replyMsg.YourIPAddr.String()
+		row.TxID = replyMsg.TransactionID.String()
+		row.Timestamp = time.Now()
+		return dhcpDiscoverOutcome{DhcpTraceResult: row, Completed: false}, nil
 	}
 
 	multi := opts.Count > 1
 	if !multi && foundLease && leaseIP != replyMsg.YourIPAddr.String() {
-		return false, false, fmt.Errorf("lease IP mismatch: %s != %s", leaseIP, replyMsg.YourIPAddr.String())
+		return zero, fmt.Errorf("lease IP mismatch: %s != %s", leaseIP, replyMsg.YourIPAddr.String())
 	}
+
+	state := LeaseStateNew
+	if foundLease {
+		state = LeaseStateReused
+	}
+	row.OfferedIP = replyMsg.YourIPAddr.String()
+	row.LeaseState = state
+	row.TxID = replyMsg.TransactionID.String()
+	row.Timestamp = time.Now()
 
 	if multi {
 		tag := "New"
@@ -146,11 +230,11 @@ func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Durat
 			tag = "Reused"
 		}
 		out.Fprintf(w, "[%d] Sent Discover → Offer %s   [%s]\n", run, replyMsg.YourIPAddr, tag)
-		return foundLease, true, nil
+		return dhcpDiscoverOutcome{DhcpTraceResult: row, Completed: true}, nil
 	}
 
 	writeHumanOffer(w, replyMsg, foundLease, leaseIP)
-	return foundLease, true, nil
+	return dhcpDiscoverOutcome{DhcpTraceResult: row, Completed: true}, nil
 }
 
 func leaseForMAC(mac string) (found bool, leaseIP string, err error) {

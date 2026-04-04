@@ -32,3 +32,7 @@ lint: $(TOOLS_BINDIR)/golangci-lint
 .PHONY: fmt
 fmt: $(TOOLS_BINDIR)/goimports
 	@$(TOOLS_BINDIR)/goimports -l -w $(SOURCE_DIRS)
+
+.PHONY: test
+test:
+	go test -v ./...

@@ -1,6 +1,8 @@
 package agent
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+)
 
 func NewRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{

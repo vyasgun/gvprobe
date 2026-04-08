@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/vyasgun/gvprobe/pkg/ai"
 	"github.com/vyasgun/gvprobe/pkg/trace"
 )
 
@@ -86,11 +87,11 @@ func newDhcpCmd() *cobra.Command {
 				}
 				fmt.Println()
 				printQuietAnalysis(results)
-				printQuietClaudePrompt(results, varyMAC)
 			} else {
 				printAgentSummary(results)
-				printClaudePrompt(results, varyMAC)
 			}
+			prompt := generateClaudePrompt(results, varyMAC)
+			ai.AnalyseDhcpTrace(prompt)
 			return nil
 		},
 	}
@@ -193,39 +194,28 @@ func quietAnomalies(results []AgentDhcpResult, ok []AgentDhcpResult) []string {
 	return a
 }
 
-func printQuietClaudePrompt(results []AgentDhcpResult, varyMAC bool) {
-	fmt.Println("=== COPY & PASTE TO CLAUDE ===")
-	fmt.Println("Paste the following into Claude Code with the 'gvprobe' skill enabled:")
-	fmt.Println()
-	fmt.Println("---")
-	fmt.Println("Analyze these gvprobe agent DHCP results (compact run).")
+func generateClaudePrompt(results []AgentDhcpResult, varyMAC bool) string {
+	prompt := "Analyze these gvprobe agent DHCP results (compact run)."
 	if varyMAC {
-		fmt.Println("MACs were varied across runs.")
+		prompt += "MACs were varied across runs."
 	}
-	fmt.Println()
-	fmt.Printf("Total runs: %d\n", len(results))
+	prompt += fmt.Sprintf("Total runs: %d\n", len(results))
 	var ok int
 	for _, r := range results {
 		if r.Error == nil && r.OfferedIP != "" {
 			ok++
 		}
 	}
-	fmt.Printf("Successful offers: %d\n", ok)
-	fmt.Println()
-	fmt.Println("Per run:")
+	prompt += fmt.Sprintf("Successful offers: %d\n", ok)
+	prompt += "Per run:"
 	for _, r := range results {
 		tr := agentDhcpAsTraceRow(r)
-		fmt.Printf("- Run %d: MAC=%s → Offered IP=%s   [%s]\n", r.RunNumber, r.MAC, tr.QuietOfferedIP(), tr.QuietLeaseTag())
+		prompt += fmt.Sprintf("- Run %d: MAC=%s → Offered IP=%s   [%s]\n", r.RunNumber, r.MAC, tr.QuietOfferedIP(), tr.QuietLeaseTag())
 	}
-	fmt.Println()
-	fmt.Println("Context:")
-	fmt.Println("- gvproxy DHCP; lease state from gvproxy /leases vs offered YourIP.")
-	fmt.Println()
-	fmt.Println("Questions:")
-	fmt.Println("- Was lease behavior stable and consistent with expectations?")
-	fmt.Println("- Any anomalies (timeouts, duplicate IPs across MACs, unexpected subnet)?")
-	fmt.Println("- What follow-up gvprobe commands would best stress-test DHCP next?")
-	fmt.Println("---")
+	prompt += "Context:"
+	prompt += "- gvproxy DHCP; lease state from gvproxy /leases vs offered YourIP."
+	prompt += "- What follow-up gvprobe commands would best stress-test DHCP next?"
+	return prompt
 }
 
 func printAgentSummary(results []AgentDhcpResult) {
@@ -260,35 +250,6 @@ func printAgentSummary(results []AgentDhcpResult) {
 		fmt.Printf("Lease behavior: Mixed (%d reused, %d new of %d successful)\n", nReused, nNew, ok)
 	}
 	fmt.Println()
-}
-
-func printClaudePrompt(results []AgentDhcpResult, varyMAC bool) {
-	fmt.Println("=== COPY & PASTE TO CLAUDE ===")
-	fmt.Println("Paste the following into Claude Code with the 'gvprobe' skill enabled:")
-	fmt.Println()
-	fmt.Println("---")
-	fmt.Println("Analyze these DHCP trace results using the gvprobe skill.")
-	if varyMAC {
-		fmt.Println("MACs were varied across runs.")
-	}
-	fmt.Println()
-	fmt.Printf("Total runs: %d\n", len(results))
-	fmt.Println()
-	for i, r := range results {
-		tr := agentDhcpAsTraceRow(r)
-		tag := tr.QuietLeaseTag()
-		if r.OfferedIP != "" {
-			fmt.Printf("Run %d: MAC=%s → IP=%s (%s)\n", i+1, r.MAC, r.OfferedIP, tag)
-		} else {
-			fmt.Printf("Run %d: MAC=%s → no offer (%s)\n", i+1, r.MAC, tag)
-		}
-	}
-	fmt.Println()
-	fmt.Println("Questions for analysis:")
-	fmt.Println("- Was lease behavior stable?")
-	fmt.Println("- Any anomalies or unexpected IPs?")
-	fmt.Println("- Suggest next tests to run.")
-	fmt.Println("---")
 }
 
 func randomMAC() (string, error) {

@@ -3,6 +3,8 @@ package trace
 import (
 	"fmt"
 	"log"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/vyasgun/gvprobe/pkg/constants"
@@ -11,6 +13,7 @@ import (
 
 func NewDhcpCommand() *cobra.Command {
 	var opts trace.DhcpTraceOpts
+	var backend string
 
 	cmd := &cobra.Command{
 		Use:   "dhcp",
@@ -21,6 +24,9 @@ Use --quiet for one line per request without the full trace narrative.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if opts.Count < 1 {
 				log.Fatalf("count must be at least 1")
+			}
+			if opts.Backend = trace.Backend(backend); !slices.Contains(trace.BackendValues(), backend) {
+				log.Fatalf("backend must be one of: %s", strings.Join(trace.BackendValues(), ", "))
 			}
 			rows, err := trace.TraceDhcp(opts)
 			if err != nil {
@@ -38,6 +44,7 @@ Use --quiet for one line per request without the full trace narrative.`,
 	cmd.Flags().BoolVarP(&opts.Quiet, "quiet", "q", false, "suppress full trace; print one compact line per request (ignored with --machine)")
 	cmd.Flags().StringVar(&opts.MAC, "mac", constants.GuestMAC, "override guest MAC address (default: 5a:94:ef:e4:0c:ee)")
 	cmd.Flags().IntVar(&opts.Count, "count", 1, "number of DHCP requests to send")
+	cmd.Flags().StringVar(&backend, "backend", string(trace.BackendVfkit), "gvproxy datapath backend (vfkit, qemu, bess, vpnkit, stdio)")
 
 	return cmd
 }

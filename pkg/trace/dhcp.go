@@ -17,9 +17,8 @@ import (
 	"github.com/vyasgun/gvprobe/internal/out"
 	"github.com/vyasgun/gvprobe/pkg/constants"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy"
+	"github.com/vyasgun/gvprobe/pkg/gvproxy/datapath"
 )
-
-var vfkitRemote = &net.UnixAddr{Name: constants.VfkitSocket, Net: "unixgram"}
 
 const dhcpReadTimeout = 3 * time.Second
 
@@ -29,6 +28,7 @@ type DhcpTraceOpts struct {
 	Machine bool
 	// Quiet suppresses human-oriented trace output (writes to io.Discard).
 	Quiet bool
+	Backend
 }
 type LeaseState string
 
@@ -80,7 +80,7 @@ func (r DhcpTraceResult) QuietLeaseTag() string {
 	}
 }
 
-// dhcpDiscoverOutcome is one vfkit round-trip: a trace row plus Completed for human-mode summaries.
+// dhcpDiscoverOutcome is one datapath round-trip: a trace row plus Completed for human-mode summaries.
 type dhcpDiscoverOutcome struct {
 	DhcpTraceResult
 	Completed bool // human mode: DHCP offer parsed (counts toward nDone / reuse tallies)
@@ -99,6 +99,9 @@ func TraceDhcp(opts DhcpTraceOpts) ([]DhcpTraceResult, error) {
 	if opts.Count < 1 {
 		opts.Count = 1
 	}
+	if opts.Backend == "" {
+		opts.Backend = BackendVfkit
+	}
 
 	suppressHuman := opts.Quiet && !opts.Machine
 	w := io.Writer(os.Stdout)
@@ -112,7 +115,7 @@ func TraceDhcp(opts DhcpTraceOpts) ([]DhcpTraceResult, error) {
 
 	var nReused, nNew, nDone int
 
-	err = gvproxy.WithVfkitLocal(func(c *net.UnixConn) error {
+	err = datapath.WithSession(string(opts.Backend), func(s datapath.Session) error {
 		for run := 1; run <= opts.Count; run++ {
 			dhcpMsg, err := buildDhcpDiscover(opts.MAC)
 			if err != nil {
@@ -123,7 +126,7 @@ func TraceDhcp(opts DhcpTraceOpts) ([]DhcpTraceResult, error) {
 				return fmt.Errorf("failed to build Ethernet frame: %w", err)
 			}
 
-			trip, err := dhcpDiscoverRoundTrip(c, frame, dhcpReadTimeout, run, opts, w)
+			trip, err := dhcpDiscoverRoundTrip(s, frame, dhcpReadTimeout, run, opts, w)
 			if err != nil {
 				return err
 			}
@@ -155,7 +158,7 @@ func TraceDhcp(opts DhcpTraceOpts) ([]DhcpTraceResult, error) {
 	return results, nil
 }
 
-func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Duration, run int, opts DhcpTraceOpts, w io.Writer) (dhcpDiscoverOutcome, error) {
+func dhcpDiscoverRoundTrip(s datapath.Session, frame []byte, readTimeout time.Duration, run int, opts DhcpTraceOpts, w io.Writer) (dhcpDiscoverOutcome, error) {
 	row := DhcpTraceResult{MAC: opts.MAC, Timestamp: time.Now()}
 	var zero dhcpDiscoverOutcome
 
@@ -170,13 +173,11 @@ func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Durat
 		writeHumanDiscover(w, opts.MAC)
 	}
 
-	if _, err := c.WriteTo(frame, vfkitRemote); err != nil {
+	if err := s.SendFrame(frame); err != nil {
 		return zero, err
 	}
 
-	_ = c.SetReadDeadline(time.Now().Add(readTimeout))
-	reply := make([]byte, 65536)
-	n, _, err := c.ReadFrom(reply)
+	reply, err := s.RecvFrame(readTimeout)
 	if err != nil {
 		if ne, ok := err.(net.Error); ok && ne.Timeout() {
 			if opts.Machine {
@@ -193,17 +194,17 @@ func dhcpDiscoverRoundTrip(c *net.UnixConn, frame []byte, readTimeout time.Durat
 		return zero, err
 	}
 
-	replyMsg, err := parseDhcpFromEthernet(reply[:n])
+	replyMsg, err := parseDhcpFromEthernet(reply)
 	if err != nil {
 		if opts.Machine {
-			writeDhcpEthernetTrace(w, fmt.Sprintf("inbound L2 frame (run %d)", run), reply[:n])
+			writeDhcpEthernetTrace(w, fmt.Sprintf("inbound L2 frame (run %d)", run), reply)
 			return dhcpDiscoverOutcome{DhcpTraceResult: row, Completed: false}, nil
 		}
 		return zero, fmt.Errorf("decode DHCP reply: %w", err)
 	}
 
 	if opts.Machine {
-		writeDhcpEthernetTrace(w, fmt.Sprintf("inbound L2 frame (run %d)", run), reply[:n])
+		writeDhcpEthernetTrace(w, fmt.Sprintf("inbound L2 frame (run %d)", run), reply)
 		row.OfferedIP = replyMsg.YourIPAddr.String()
 		row.TxID = replyMsg.TransactionID.String()
 		row.Timestamp = time.Now()

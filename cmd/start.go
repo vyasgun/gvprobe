@@ -3,26 +3,35 @@ package cmd
 import (
 	"errors"
 	"log"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy"
+	"github.com/vyasgun/gvprobe/pkg/gvproxy/datapath"
+	"github.com/vyasgun/gvprobe/pkg/trace"
 )
 
 func NewStartCommand() *cobra.Command {
-	return &cobra.Command{
+	var backend string
+	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start gvproxy service",
 		Run: func(cmd *cobra.Command, args []string) {
-			var err error
-			var pid int
-			if pid, err = gvproxy.Start(); err != nil {
+			if !slices.Contains(datapath.SupportedBackends, backend) {
+				log.Fatalf("backend must be one of: %s", strings.Join(datapath.SupportedBackends, ", "))
+			}
+			pid, err := gvproxy.Start(backend)
+			if err != nil {
 				if errors.Is(err, gvproxy.ErrGvproxyAlreadyRunning) {
 					log.Printf("gvproxy is already running at pid %d", pid)
 					return
 				}
 				log.Fatalf("failed to start gvproxy: %v", err)
 			}
-			log.Printf("gvproxy started with pid: %d", pid)
+			log.Printf("gvproxy started with pid %d (backend: %s)", pid, backend)
 		},
 	}
+	cmd.Flags().StringVar(&backend, "backend", string(trace.BackendVfkit), "gvproxy datapath backend (vfkit, bess)")
+	return cmd
 }

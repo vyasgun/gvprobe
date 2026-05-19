@@ -36,3 +36,6 @@ fmt: $(TOOLS_BINDIR)/goimports
 .PHONY: test
 test:
 	go test -v ./...
+
+clean:
+	rm -rf bin

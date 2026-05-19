@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shirou/gopsutil/process"
 	"github.com/vyasgun/gvprobe/pkg/constants"
@@ -22,6 +23,18 @@ func readPIDFromFile() (int, error) {
 		return 0, errInvalidPIDFile
 	}
 	return pid, nil
+}
+
+// waitForGvproxyRunning polls briefly after exec; gvproxy can exit quickly on bind errors.
+func waitForGvproxyRunning(pid int) bool {
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if runningGvproxyByPID(pid) {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return runningGvproxyByPID(pid)
 }
 
 // runningGvproxyByPID reports whether pid refers to a live process named "gvproxy".

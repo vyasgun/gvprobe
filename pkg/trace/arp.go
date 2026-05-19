@@ -12,6 +12,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/vyasgun/gvprobe/internal/out"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy"
+	"github.com/vyasgun/gvprobe/pkg/gvproxy/datapath"
 )
 
 type ArpTraceOpts struct {
@@ -66,7 +67,7 @@ func TraceArp(opts ArpTraceOpts) error {
 		return fmt.Errorf("failed to serialize ARP packet: %w", err)
 	}
 
-	if err := gvproxy.WithVfkitLocal(func(c *net.UnixConn) error {
+	return datapath.WithSession(string(BackendVfkit), func(s datapath.Session) error {
 		w := os.Stdout
 		if opts.Machine {
 			writeArpEthernetTrace(w, "outbound L2 frame (ARP request)", buf.Bytes())
@@ -74,13 +75,11 @@ func TraceArp(opts ArpTraceOpts) error {
 			writeHumanArpRequest(w, opts.Target, mac.String())
 		}
 
-		if _, err := c.WriteTo(buf.Bytes(), vfkitRemote); err != nil {
+		if err := s.SendFrame(buf.Bytes()); err != nil {
 			return fmt.Errorf("failed to write ARP packet: %w", err)
 		}
 
-		_ = c.SetReadDeadline(time.Now().Add(arpReadTimeout))
-		reply := make([]byte, 65536)
-		n, _, err := c.ReadFrom(reply)
+		reply, err := s.RecvFrame(arpReadTimeout)
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				if !opts.Machine {
@@ -91,20 +90,17 @@ func TraceArp(opts ArpTraceOpts) error {
 			return fmt.Errorf("failed to read ARP reply: %w", err)
 		}
 
-		replyMsg, err := parseArpFromEthernet(reply[:n])
+		replyMsg, err := parseArpFromEthernet(reply)
 		if err != nil {
 			return fmt.Errorf("failed to parse ARP reply: %w", err)
 		}
 		if opts.Machine {
-			writeArpEthernetTrace(w, "inbound L2 frame (ARP reply)", reply[:n])
+			writeArpEthernetTrace(w, "inbound L2 frame (ARP reply)", reply)
 		} else {
 			writeHumanArpReply(w, replyMsg)
 		}
 		return nil
-	}); err != nil {
-		return fmt.Errorf("failed to trace ARP: %w", err)
-	}
-	return nil
+	})
 }
 
 func buildArpRequest(mac net.HardwareAddr, sender4, target4 net.IP) *layers.ARP {

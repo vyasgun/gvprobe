@@ -11,7 +11,7 @@ import (
 
 var ErrGvproxyAlreadyRunning = errors.New("gvproxy is already running")
 
-func Start() (int, error) {
+func Start(backend string) (int, error) {
 	pid, err := readPIDFromFile()
 	if err == nil {
 		if runningGvproxyByPID(pid) {
@@ -23,7 +23,7 @@ func Start() (int, error) {
 		log.Printf("removing invalid pid file %s", constants.GvproxyPidFile)
 		_ = os.Remove(constants.GvproxyPidFile)
 	}
-	cmd := NewDefaulCommand()
+	cmd := NewCommand(backend)
 	pid, err = RunCommand(cmd)
 	if err != nil {
 		return 0, fmt.Errorf("failed to start gvproxy: %w", err)

@@ -12,7 +12,15 @@ import (
 var (
 	vfkitLocalMu   sync.Mutex
 	vfkitLocalConn *net.UnixConn
+
+	bessLocalMu   sync.Mutex
+	bessLocalConn *net.UnixConn
 )
+
+func closeLocalListeners() {
+	closeVfkitLocalListener()
+	closeBessLocalListener()
+}
 
 func closeVfkitLocalListener() {
 	vfkitLocalMu.Lock()
@@ -22,6 +30,16 @@ func closeVfkitLocalListener() {
 		vfkitLocalConn = nil
 	}
 	_ = os.Remove(constants.VfkitLocalSocket)
+}
+
+func closeBessLocalListener() {
+	bessLocalMu.Lock()
+	defer bessLocalMu.Unlock()
+	if bessLocalConn != nil {
+		_ = bessLocalConn.Close()
+		bessLocalConn = nil
+	}
+	_ = os.Remove(constants.BessLocalSocket)
 }
 
 // WithVfkitLocal runs fn with the vfkit client unixgram socket.
@@ -41,4 +59,23 @@ func WithVfkitLocal(fn func(*net.UnixConn) error) error {
 		vfkitLocalConn = c
 	}
 	return fn(vfkitLocalConn)
+}
+
+// WithBessLocal runs fn with a connected unixpacket socket to gvproxy's bess listener.
+// Unlike vfkit (unixgram + WriteTo), SOCK_SEQPACKET requires connect before send/recv.
+func WithBessLocal(fn func(*net.UnixConn) error) error {
+	bessLocalMu.Lock()
+	defer bessLocalMu.Unlock()
+	if bessLocalConn == nil {
+		_ = os.Remove(constants.BessLocalSocket)
+		c, err := net.DialUnix("unixpacket",
+			&net.UnixAddr{Name: constants.BessLocalSocket, Net: "unixpacket"},
+			&net.UnixAddr{Name: constants.BessSocket, Net: "unixpacket"},
+		)
+		if err != nil {
+			return fmt.Errorf("bess connect %s: %w", constants.BessSocket, err)
+		}
+		bessLocalConn = c
+	}
+	return fn(bessLocalConn)
 }

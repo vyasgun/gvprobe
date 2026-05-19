@@ -14,13 +14,13 @@ func Stop() error {
 	pid, err := readPIDFromFile()
 	if err != nil {
 		if os.IsNotExist(err) || errors.Is(err, errInvalidPIDFile) {
-			closeVfkitLocalListener()
+			closeLocalListeners()
 			return fmt.Errorf("gvproxy is not running")
 		}
 		return err
 	}
 	if !runningGvproxyByPID(pid) {
-		closeVfkitLocalListener()
+		closeLocalListeners()
 		return fmt.Errorf("gvproxy is not running")
 	}
 	proc, err := process.NewProcess(int32(pid))
@@ -40,7 +40,7 @@ func Stop() error {
 		select {
 		case <-t.C:
 			if !runningGvproxyByPID(pid) {
-				closeVfkitLocalListener()
+				closeLocalListeners()
 				return nil
 			}
 		case <-timeout:

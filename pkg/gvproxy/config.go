@@ -9,11 +9,26 @@ import (
 )
 
 func NewDefaulCommand() gvproxytypes.GvproxyCommand {
+	return NewCommand("vfkit")
+}
+
+// NewCommand builds a gvproxy command with one datapath listen socket for backend.
+// Supported backends: vfkit (default), bess.
+func NewCommand(backend string) gvproxytypes.GvproxyCommand {
+	if backend == "" {
+		backend = "vfkit"
+	}
 	cmd := gvproxytypes.NewGvproxyCommand()
 	cmd.PidFile = constants.GvproxyPidFile
 	cmd.LogFile = constants.GvproxyLogFile
 	cmd.Debug = true
-	cmd.AddVfkitSocket(fmt.Sprintf("unixgram://%s", constants.VfkitSocket))
+	cmd.SSHPort = constants.GvproxySSHPort
+	switch backend {
+	case "bess":
+		cmd.AddBessSocket(fmt.Sprintf("unixpacket://%s", constants.BessSocket))
+	default:
+		cmd.AddVfkitSocket(fmt.Sprintf("unixgram://%s", constants.VfkitSocket))
+	}
 	cmd.AddServiceEndpoint(constants.GvproxyServicesListen)
 	return cmd
 }

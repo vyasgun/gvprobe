@@ -13,7 +13,7 @@ func NewDefaulCommand() gvproxytypes.GvproxyCommand {
 }
 
 // NewCommand builds a gvproxy command with one datapath listen socket for backend.
-// Supported backends: vfkit (default), bess.
+// Supported backends: vfkit (default), bess, qemu.
 func NewCommand(backend string) gvproxytypes.GvproxyCommand {
 	if backend == "" {
 		backend = "vfkit"
@@ -26,6 +26,8 @@ func NewCommand(backend string) gvproxytypes.GvproxyCommand {
 	switch backend {
 	case "bess":
 		cmd.AddBessSocket(fmt.Sprintf("unixpacket://%s", constants.BessSocket))
+	case "qemu":
+		cmd.AddQemuSocket(fmt.Sprintf("unix://%s", constants.QemuSocket))
 	default:
 		cmd.AddVfkitSocket(fmt.Sprintf("unixgram://%s", constants.VfkitSocket))
 	}

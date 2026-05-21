@@ -3,6 +3,7 @@ package datapath
 import (
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/vyasgun/gvprobe/pkg/constants"
@@ -25,6 +26,8 @@ func WithSession(backend string, fn func(Session) error) error {
 		return withVfkit(fn)
 	case "bess":
 		return withBess(fn)
+	case "qemu":
+		return withQemu(fn)
 	default:
 		return fmt.Errorf("backend %q is not supported yet (supported: %s)", backend, joinBackends())
 	}
@@ -69,15 +72,17 @@ func withVfkit(fn func(Session) error) error {
 }
 
 func withBess(fn func(Session) error) error {
-	return gvproxy.WithBessLocal(func(c *net.UnixConn) error {
+	return gvproxy.WithBessConn(func(c *net.UnixConn) error {
 		return fn(&unixConnSession{conn: c})
 	})
 }
 
+func withQemu(fn func(Session) error) error {
+	return gvproxy.WithQemuConn(func(c net.Conn) error {
+		return fn(&qemuSession{conn: c})
+	})
+}
+
 func joinBackends() string {
-	s := SupportedBackends[0]
-	for i := 1; i < len(SupportedBackends); i++ {
-		s += ", " + SupportedBackends[i]
-	}
-	return s
+	return strings.Join(SupportedBackends, ", ")
 }

@@ -15,11 +15,15 @@ var (
 
 	bessLocalMu   sync.Mutex
 	bessLocalConn *net.UnixConn
+
+	qemuLocalMu   sync.Mutex
+	qemuLocalConn net.Conn
 )
 
 func closeLocalListeners() {
 	closeVfkitLocalListener()
-	closeBessLocalListener()
+	closeBessConn()
+	closeQemuConn()
 }
 
 func closeVfkitLocalListener() {
@@ -32,7 +36,7 @@ func closeVfkitLocalListener() {
 	_ = os.Remove(constants.VfkitLocalSocket)
 }
 
-func closeBessLocalListener() {
+func closeBessConn() {
 	bessLocalMu.Lock()
 	defer bessLocalMu.Unlock()
 	if bessLocalConn != nil {
@@ -61,9 +65,9 @@ func WithVfkitLocal(fn func(*net.UnixConn) error) error {
 	return fn(vfkitLocalConn)
 }
 
-// WithBessLocal runs fn with a connected unixpacket socket to gvproxy's bess listener.
+// WithBessConn runs fn with a connected unixpacket socket to gvproxy's bess listener.
 // Unlike vfkit (unixgram + WriteTo), SOCK_SEQPACKET requires connect before send/recv.
-func WithBessLocal(fn func(*net.UnixConn) error) error {
+func WithBessConn(fn func(*net.UnixConn) error) error {
 	bessLocalMu.Lock()
 	defer bessLocalMu.Unlock()
 	if bessLocalConn == nil {
@@ -78,4 +82,27 @@ func WithBessLocal(fn func(*net.UnixConn) error) error {
 		bessLocalConn = c
 	}
 	return fn(bessLocalConn)
+}
+
+func closeQemuConn() {
+	qemuLocalMu.Lock()
+	defer qemuLocalMu.Unlock()
+	if qemuLocalConn != nil {
+		_ = qemuLocalConn.Close()
+		qemuLocalConn = nil
+	}
+}
+
+// WithQemuConn runs fn with a connected unix stream socket to gvproxy's qemu listener.
+func WithQemuConn(fn func(net.Conn) error) error {
+	qemuLocalMu.Lock()
+	defer qemuLocalMu.Unlock()
+	if qemuLocalConn == nil {
+		c, err := net.Dial("unix", constants.QemuSocket)
+		if err != nil {
+			return fmt.Errorf("qemu connect %s (is gvproxy running with --backend qemu?): %w", constants.QemuSocket, err)
+		}
+		qemuLocalConn = c
+	}
+	return fn(qemuLocalConn)
 }

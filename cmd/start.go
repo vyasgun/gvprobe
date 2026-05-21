@@ -32,6 +32,6 @@ func NewStartCommand() *cobra.Command {
 			log.Printf("gvproxy started with pid %d (backend: %s)", pid, backend)
 		},
 	}
-	cmd.Flags().StringVar(&backend, "backend", string(trace.BackendVfkit), "gvproxy datapath backend (vfkit, bess)")
+	cmd.Flags().StringVar(&backend, "backend", string(trace.BackendVfkit), "gvproxy datapath backend (vfkit, bess, qemu)")
 	return cmd
 }

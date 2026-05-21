@@ -16,6 +16,8 @@ var (
 	VfkitLocalSocket = filepath.Join(GvprobeConfigDir, "vfkit-local.sock")
 	BessSocket       = filepath.Join(GvprobeConfigDir, "bess.sock")
 	BessLocalSocket  = filepath.Join(GvprobeConfigDir, "bess-local.sock")
+	QemuSocket       = filepath.Join(GvprobeConfigDir, "qemu.sock")
+	QemuLocalSocket  = filepath.Join(GvprobeConfigDir, "qemu-local.sock")
 
 	// GuestMAC matches gvproxy's default DHCP static lease for 192.168.127.2.
 	GuestMAC = "5a:94:ef:e4:0c:ee"

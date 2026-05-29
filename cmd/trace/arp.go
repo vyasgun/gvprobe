@@ -12,12 +12,8 @@ func NewArpCommand() *cobra.Command {
 	var opts trace.ArpTraceOpts
 	cmd := &cobra.Command{
 		Use:   "arp",
-		Short: "Trace ARP via vfkit",
-		Long: `Sends one ARP request through gvproxy's vfkit unixgram path.	
-Default output is human readable; use --machine for raw packet decode.
-
-Example:
-  gvprobe trace arp --target 192.168.127.1 --sender 192.168.127.2 --mac 5a:94:ef:e4:0c:ee
+		Short: "send ARP request",
+		Long: `Sends one ARP request through one of the supported backends (vfkit by default).	
 `,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := trace.TraceArp(opts); err != nil {

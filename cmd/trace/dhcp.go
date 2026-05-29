@@ -17,10 +17,9 @@ func NewDhcpCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "dhcp",
-		Short: "Trace DHCP via vfkit (human output by default)",
-		Long: `Sends one or more DHCP Discover packets through gvproxy's vfkit unixgram path.
-Default output is human readable; use --machine for raw packet decode.
-Use --quiet for one line per request without the full trace narrative.`,
+		Short: "Trace DHCP via one of the supported backends (vfkit by default) (human output by default)",
+		Long: `Sends one or more DHCP Discover packets through one of the supported backends (vfkit by default).
+Default output is human readable; use --machine for raw packet decode.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if opts.Count < 1 {
 				log.Fatalf("count must be at least 1")
@@ -44,7 +43,7 @@ Use --quiet for one line per request without the full trace narrative.`,
 	cmd.Flags().BoolVarP(&opts.Quiet, "quiet", "q", false, "suppress full trace; print one compact line per request (ignored with --machine)")
 	cmd.Flags().StringVar(&opts.MAC, "mac", constants.GuestMAC, "override guest MAC address (default: 5a:94:ef:e4:0c:ee)")
 	cmd.Flags().IntVar(&opts.Count, "count", 1, "number of DHCP requests to send")
-	cmd.Flags().StringVar(&backend, "backend", string(trace.BackendVfkit), "gvproxy datapath backend (vfkit, qemu, bess, vpnkit, stdio)")
+	cmd.Flags().StringVar(&backend, "backend", string(trace.BackendVfkit), fmt.Sprintf("gvproxy datapath backend (%s)", strings.Join(trace.BackendValues(), ", ")))
 
 	return cmd
 }

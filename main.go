@@ -6,6 +6,7 @@ import (
 
 	"github.com/vyasgun/gvprobe/cmd"
 	"github.com/vyasgun/gvprobe/cmd/agent"
+	attachcmd "github.com/vyasgun/gvprobe/cmd/attach"
 	"github.com/vyasgun/gvprobe/cmd/trace"
 	"github.com/vyasgun/gvprobe/pkg/constants"
 )
@@ -28,6 +29,7 @@ func init() {
 	rootCmd.AddCommand(cmd.NewStartCommand())
 	rootCmd.AddCommand(cmd.NewStopCommand())
 	rootCmd.AddCommand(cmd.NewStatusCommand())
+	rootCmd.AddCommand(attachcmd.NewAttachCommand())
 	rootCmd.AddCommand(trace.NewRootCommand())
 	rootCmd.AddCommand(agent.NewRootCommand())
 }

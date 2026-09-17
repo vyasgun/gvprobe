@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/vyasgun/gvprobe/pkg/constants"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy/datapath"
 	"github.com/vyasgun/gvprobe/pkg/trace"
@@ -28,6 +29,9 @@ func NewStartCommand() *cobra.Command {
 					return
 				}
 				log.Fatalf("failed to start gvproxy: %v", err)
+			}
+			if err := constants.WriteBackend(backend); err != nil {
+				log.Printf("warning: could not save backend: %v", err)
 			}
 			log.Printf("gvproxy started with pid %d (backend: %s)", pid, backend)
 		},

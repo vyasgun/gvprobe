@@ -115,7 +115,7 @@ func TraceDhcp(opts DhcpTraceOpts) ([]DhcpTraceResult, error) {
 
 	var nReused, nNew, nDone int
 
-	err = datapath.WithSession(string(opts.Backend), func(s datapath.Session) error {
+	err = datapath.WithSessionOrAttach(string(opts.Backend), func(s datapath.Session) error {
 		for run := 1; run <= opts.Count; run++ {
 			dhcpMsg, err := buildDhcpDiscover(opts.MAC)
 			if err != nil {

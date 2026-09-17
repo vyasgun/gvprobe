@@ -11,6 +11,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/vyasgun/gvprobe/internal/out"
+	"github.com/vyasgun/gvprobe/pkg/constants"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy/datapath"
 )
@@ -67,7 +68,7 @@ func TraceArp(opts ArpTraceOpts) error {
 		return fmt.Errorf("failed to serialize ARP packet: %w", err)
 	}
 
-	return datapath.WithSession(string(BackendVfkit), func(s datapath.Session) error {
+	return datapath.WithSessionOrAttach(constants.ReadBackend(), func(s datapath.Session) error {
 		w := os.Stdout
 		if opts.Machine {
 			writeArpEthernetTrace(w, "outbound L2 frame (ARP request)", buf.Bytes())

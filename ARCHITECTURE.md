@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-gvprobe is a lightweight CLI for **tracing and injecting** DHCP and ARP packets into [gvisor-tap-vsock](https://github.com/containers/gvisor-tap-vsock) / `gvproxy` via the vfkit unixgram socket. It's used for exploring and debugging gvproxy's virtual networking behavior from the host.
+gvprobe is a CLI for **functional testing and tracing** of [gvisor-tap-vsock](https://github.com/containers/gvisor-tap-vsock) / `gvproxy`. It simulates a guest VM's NIC from the host: raw Ethernet frames are exchanged with gvproxy over its VM datapath sockets, with a "guest micro-stack" (DHCP lease, ARP, ICMP, UDP) on top.
 
-State is kept in `~/.gvprobe/` (PID file, sockets, logs).
+State is kept in `~/.gvprobe/` (PID file, sockets, logs, backend name).
 
 ## Build & Development Commands
 
@@ -30,79 +30,66 @@ make fmt         # Format code with goimports
 Built with cobra. Command hierarchy:
 ```
 gvprobe
-├── start          # Start gvproxy process
+├── start          # Start gvproxy process (--backend vfkit|bess|qemu)
 ├── stop           # Stop gvproxy
 ├── status         # Check gvproxy status
 ├── version        # Show version info
-└── trace          # Trace/inject packets
-    ├── dhcp       # Send DHCP Discover packets
-    └── arp        # Send ARP who-has requests
+├── attach         # Hold a persistent datapath session (proxy for trace)
+├── trace          # One-off packet traces
+│   ├── dhcp       # Send DHCP Discover packets
+│   └── arp        # Send ARP who-has requests
+└── agent          # AI-assisted analysis (Vertex AI)
+    └── dhcp
 ```
 
-Commands are registered in `main.go:init()`. Each command lives in `cmd/` or `cmd/trace/`.
+Commands are registered in `main.go:init()`. Each command lives in `cmd/` or `cmd/<group>/`.
 
 ### Core Packages
 
-**`pkg/gvproxy/`** — gvproxy lifecycle management
-- `start.go`: Launch gvproxy subprocess with default config
-- `stop.go`: Stop via PID file
-- `status.go`: Check if running
-- `pid.go`: PID file read/write/validation
-- `config.go`: gvproxy configuration (network settings, sockets)
-- `vfkit_local.go`: Manage vfkit-local.sock (client-side unixgram socket)
+**`pkg/packet/`** — Pure frame builders/parsers (no I/O)
+- `ethernet.go`: UDP/ICMP frame builders, `ParseFrame` (never panics on short/garbage input — see gvisor-tap-vsock#780)
+- `arp.go`, `dhcp.go`, `icmp.go`: protocol-specific builders
+- `dns.go`: dependency-free DNS wire codec (query build, response parse incl. compression pointers, TXT character-strings)
 
-**`pkg/trace/`** — Packet injection and tracing
-- `dhcp.go`: Build DHCP Discover packets, send via vfkit socket, parse Offers, check lease state via HTTP API
-- `arp.go`: Build ARP requests, send/receive via vfkit socket
+**`pkg/gvproxy/`** — gvproxy lifecycle and HTTP services
+- `start.go`/`stop.go`/`status.go`/`pid.go`: process management
+- `config.go`: gvproxy command line (via vendored upstream `pkg/types`)
+- `datapath_client.go`: client-side sockets (vfkit local bind, bess, qemu)
+- `leases.go`: `GET /services/dhcp/leases` lookup
+- `forwarder.go`: port-forward REST client (`/services/forwarder/{all,expose,unexpose}`)
 
-**`pkg/constants/`** — Paths and defaults
-- Config dir: `~/.gvprobe/`
-- Sockets: `vfkit.sock` (gvproxy listens), `vfkit-local.sock` (gvprobe binds)
-- Default guest: MAC `5a:94:ef:e4:0c:ee`, IP `192.168.127.2`
-- Gateway: `192.168.127.1`
-- gvproxy services API: gvprobe starts gvproxy with `-services tcp://0.0.0.0:5555`; HTTP clients use `GvproxyURL` (`http://0.0.0.0:5555`) for `/services/dhcp/leases`.
+**`pkg/gvproxy/datapath/`** — Session abstraction
+- `session.go`: `Session` interface (`SendFrame`/`RecvFrame`), `WithSession`, `WithSessionOrAttach` (routes through the attach proxy when `attach.sock` exists)
+- Backends: vfkit (unixgram `WriteTo`), bess (unixpacket, Linux-oriented), qemu (stream with 4-byte big-endian length prefix)
 
-**`internal/version/`** — Version/commit injected via ldflags at build time
+**`pkg/attach/`** — Persistent session proxy
+- `attach.go`/`server.go`: holds one datapath Session open (qemu/bess gvproxy can exit on client disconnect) and proxies frames over `attach.sock`. Wire protocol per round-trip: `[4B BE timeout_ms][4B BE frame_len][frame]` → `[1B status][4B BE len][payload]`
 
-**`internal/out/`** — Best-effort `Fprintf` / `Fprintln` for CLI output (errors from stdout are ignored on purpose).
+**`pkg/trace/`** — One-off trace commands (DHCP/ARP), consumers of `pkg/packet`
+
+**`pkg/constants/`** — Paths, subnet (192.168.127.0/24, guest .2, gateway .1), services API URL, backend persistence (`~/.gvprobe/backend`)
+
+**`internal/version/`**, **`internal/out/`** — ldflags version; best-effort output helpers
+
+**`pkg/ai/`** — Anthropic via Vertex AI (used by `agent dhcp`)
 
 ### gvproxy Communication
 
-gvprobe talks to gvproxy via **unixgram sockets**:
-1. gvproxy listens on `~/.gvprobe/vfkit.sock` (configured via `--vfkit-listen`)
-2. gvprobe binds `~/.gvprobe/vfkit-local.sock` lazily on first trace command
-3. Raw Ethernet frames (built with gopacket) are sent/received over these sockets
-4. DHCP lease state is queried via gvproxy's HTTP API at `/services/dhcp/leases`
+1. gvproxy listens on one datapath socket per backend (`vfkit.sock` unixgram, `bess.sock` unixpacket, `qemu.sock` stream)
+2. gvprobe connects/binds lazily; `WithSessionOrAttach` prefers the attach proxy when running
+3. Raw Ethernet frames (gopacket) are exchanged; gvproxy's switch learns our MAC into its CAM table from the first frame
+4. gvproxy's HTTP services API (`http://0.0.0.0:5555`) is used for DHCP leases and port forwarding
 
-The vfkit socket protocol emulates the vfkit VM interface, allowing host-side packet injection for testing.
+### Upstream regression notes
 
-### DHCP Tracing Flow
+Known gvisor-tap-vsock issues worth probing: #780 (short frames), #772 (MX NODATA), #612 (SOA/SRV/PTR), #563/#562 (TXT).
 
-1. Check if lease exists for MAC via HTTP GET to `/services/dhcp/leases`
-2. Build DHCP Discover message (using insomniacslk/dhcp library)
-3. Wrap in Ethernet → IPv4 → UDP layers (using gopacket)
-4. Send raw frame over vfkit-local.sock → vfkit.sock
-5. Read reply with timeout (default 3s)
-6. Parse reply, extract Offer
-7. Report whether lease was reused or newly assigned
-
-Supports:
-- Custom MAC addresses
-- Multiple requests (`--count N`) to test lease stability
-- Human-readable output (default) or raw gopacket decode (`--machine`)
-
-### ARP Tracing Flow
-
-Similar to DHCP but simpler:
-1. Build ARP "who-has" request for target IP (default: gateway 192.168.127.1)
-2. Send over vfkit socket
-3. Parse ARP reply
-
-Note: ARP replies for guest IPs may be dropped by gvproxy's anti-spoofing protection. Gateway ARP works reliably.
+Note: ARP replies for guest IPs may be dropped by gvproxy's anti-spoofing protection. Gateway ARP works reliably. Never attempt to bypass the anti-spoofing protection.
 
 ## Key Implementation Details
 
-- **Process isolation:** Each gvprobe invocation is a separate process. `start` and `trace` don't share state except via filesystem (PID file, sockets).
-- **Lazy socket binding:** `vfkit_local.go` uses sync.Mutex to ensure vfkit-local.sock is bound once per process on first `WithVfkitLocal()` call.
-- **PID management:** `gvproxy.pid` stores running gvproxy PID. Stale PIDs are detected via process existence check before starting new instance.
+- **Process isolation:** Each gvprobe invocation is a separate process; state is shared only via the filesystem (PID files, sockets, backend file).
+- **Lazy socket binding:** `datapath_client.go` uses sync.Mutex to bind client sockets once per process.
+- **PID management:** stale PIDs are detected via process existence checks.
+- **Parse safety:** all frame/message parsers must return errors, never panic, on malformed input — gvprobe must not replicate the class of bug it probes (upstream #780).
 - **Version injection:** `Makefile` uses `-ldflags` to inject git tag/commit into `internal/version`.

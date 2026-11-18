@@ -64,16 +64,20 @@ type DNSMessage struct {
 }
 
 // BuildDNSQuery encodes a recursive query for name/type with a random ID.
-func BuildDNSQuery(q DNSQuestion) ([]byte, error) {
+// It returns the ID alongside the wire bytes so the caller can verify the
+// response carries the same ID — a reply with a different ID belongs to
+// another exchange and must not be treated as the answer.
+func BuildDNSQuery(q DNSQuestion) (uint16, []byte, error) {
 	if q.Name == "" {
-		return nil, fmt.Errorf("empty DNS name")
+		return 0, nil, fmt.Errorf("empty DNS name")
 	}
 	if len(q.Name) > 253 {
-		return nil, fmt.Errorf("DNS name too long: %d bytes", len(q.Name))
+		return 0, nil, fmt.Errorf("DNS name too long: %d bytes", len(q.Name))
 	}
+	id := uint16(rand.Intn(1 << 16))
 	m := &dns.Msg{
 		MsgHdr: dns.MsgHdr{
-			Id:               uint16(rand.Intn(1 << 16)),
+			Id:               id,
 			RecursionDesired: true,
 		},
 		Question: []dns.Question{{
@@ -82,7 +86,11 @@ func BuildDNSQuery(q DNSQuestion) ([]byte, error) {
 			Qclass: dns.ClassINET,
 		}},
 	}
-	return m.Pack()
+	buf, err := m.Pack()
+	if err != nil {
+		return 0, nil, err
+	}
+	return id, buf, nil
 }
 
 // ParseDNSMessage decodes a response. It never panics on malformed input:
@@ -134,7 +142,8 @@ func convertRRs(rrs []dns.RR) []DNSRecord {
 		case *dns.NS:
 			rec.Data = v.Ns
 		case *dns.SOA:
-			rec.Data = v.Ns
+			rec.Data = fmt.Sprintf("%s %s serial=%d refresh=%d retry=%d expire=%d minttl=%d",
+				v.Ns, v.Mbox, v.Serial, v.Refresh, v.Retry, v.Expire, v.Minttl)
 		default:
 			rec.Data = rr.String()
 		}

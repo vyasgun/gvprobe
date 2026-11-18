@@ -12,8 +12,17 @@ Help make gvprobe a smart test harness that can generate diverse, meaningful tes
 **Key Capabilities**
 - Generate diverse test scenarios (lease reuse, new allocation, burst, edge cases, mixed MACs)
 - Analyze results for stability, reuse rate, IP consistency, and anomalies
+- Run the functional check suite (`gvprobe test`) and interpret pass/fail results
 - Suggest intelligent follow-up tests
 - Keep output clean and professional
+
+**The check suite (`gvprobe test`)**
+- Checks live in `pkg/checks/` and are registered in `DefaultRegistry()` (in `l2l3.go`).
+- To add a check: implement the `suite.Check` interface (`Name`/`Tags`/`Run`), register it, and add a unit test using `pkg/probe/probetest.MockSwitch` (no gvproxy needed).
+- Tags: `basic`, `l2`, `l3`, `dhcp`, `dns`, `forward`, `mtu`, `regression`. Checks guarding an upstream gvisor-tap-vsock issue record its URL in `Result.Detail` (visible via `--json`).
+- `--tags regression` includes destructive robustness probes (short frames) that can crash older gvproxy builds — warn before running them.
+- Exit codes: 0 pass, 1 fail, 2 setup error.
+- Parsers in `pkg/packet` must never panic on malformed input (upstream #780 is the cautionary tale).
 
 **Rules**
 - Default to gateway for ARP unless specified

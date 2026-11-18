@@ -10,7 +10,7 @@ LDFLAGS := \
 	-X '$(VERSION_PKG).Version=$(VERSION)' \
 	-X '$(VERSION_PKG).Commit=$(COMMIT)'
 
-SOURCE_DIRS = cmd pkg test
+SOURCE_DIRS = cmd pkg
 
 TOOLS_DIR := tools
 include tools/tools.mk
@@ -32,10 +32,6 @@ lint: $(TOOLS_BINDIR)/golangci-lint
 .PHONY: fmt
 fmt: $(TOOLS_BINDIR)/goimports
 	@$(TOOLS_BINDIR)/goimports -l -w $(SOURCE_DIRS)
-
-.PHONY: test
-test:
-	go test -v ./...
 
 clean:
 	rm -rf bin

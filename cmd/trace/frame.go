@@ -13,9 +13,7 @@ import (
 )
 
 // NewFrameCommand builds `gvprobe trace frame`: send a raw frame of the
-// given size directly into the datapath. Frames shorter than an Ethernet
-// header are exactly the malformed input class of gvisor-tap-vsock#780 —
-// this command is the minimal reproducer for that issue.
+// given size directly into the datapath.
 func NewFrameCommand() *cobra.Command {
 	var (
 		size    int
@@ -28,14 +26,8 @@ func NewFrameCommand() *cobra.Command {
 		Short: "Send a raw frame into the datapath",
 		Long: `Sends a raw Ethernet frame of the given size into gvproxy's datapath.
 
-With --listen, waits afterwards for any inbound frame and decodes it —
-useful to check whether the switch is still forwarding.
-
-Frame sizes below 14 bytes are shorter than an Ethernet header. gvproxy
-builds without the fix for gvisor-tap-vsock#780 panic or deadlock their
-switch on such frames: after sending one, a subsequent ` + "`gvprobe trace arp`" + `
-gets no reply and gvproxy no longer responds to SIGTERM. That is the
-documented reproducer for the issue.`,
+With --listen, waits afterwards for any inbound frame and decodes it
+which is useful to check whether the switch is still forwarding.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			status, err := gvproxy.Status()
 			if err != nil {

@@ -25,9 +25,10 @@ func readPIDFromFile() (int, error) {
 	return pid, nil
 }
 
-// waitForGvproxyRunning polls briefly after exec; gvproxy can exit quickly on bind errors.
-func waitForGvproxyRunning(pid int) bool {
-	deadline := time.Now().Add(500 * time.Millisecond)
+// WaitForRunning polls after exec until the deadline; gvproxy can exit
+// quickly on bind errors.
+func WaitForRunning(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if runningGvproxyByPID(pid) {
 			return true

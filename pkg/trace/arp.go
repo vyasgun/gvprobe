@@ -14,6 +14,7 @@ import (
 	"github.com/vyasgun/gvprobe/pkg/constants"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy/datapath"
+	"github.com/vyasgun/gvprobe/pkg/packet"
 )
 
 type ArpTraceOpts struct {
@@ -55,28 +56,20 @@ func TraceArp(opts ArpTraceOpts) error {
 		return fmt.Errorf("ARP sender must be IPv4, got %q", opts.SenderIP)
 	}
 
-	arp := buildArpRequest(mac, sender4, target4)
-	eth := &layers.Ethernet{
-		SrcMAC:       mac,
-		DstMAC:       layers.EthernetBroadcast,
-		EthernetType: layers.EthernetTypeARP,
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	serializeOpts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: false}
-	if err := gopacket.SerializeLayers(buf, serializeOpts, eth, arp); err != nil {
-		return fmt.Errorf("failed to serialize ARP packet: %w", err)
+	frame, err := packet.BuildArpRequest(mac, sender4, target4)
+	if err != nil {
+		return fmt.Errorf("failed to build ARP request: %w", err)
 	}
 
 	return datapath.WithSessionOrAttach(constants.ReadBackend(), func(s datapath.Session) error {
 		w := os.Stdout
 		if opts.Machine {
-			writeArpEthernetTrace(w, "outbound L2 frame (ARP request)", buf.Bytes())
+			writeArpEthernetTrace(w, "outbound L2 frame (ARP request)", frame)
 		} else {
 			writeHumanArpRequest(w, opts.Target, mac.String())
 		}
 
-		if err := s.SendFrame(buf.Bytes()); err != nil {
+		if err := s.SendFrame(frame); err != nil {
 			return fmt.Errorf("failed to write ARP packet: %w", err)
 		}
 
@@ -91,7 +84,7 @@ func TraceArp(opts ArpTraceOpts) error {
 			return fmt.Errorf("failed to read ARP reply: %w", err)
 		}
 
-		replyMsg, err := parseArpFromEthernet(reply)
+		replyMsg, err := parseArpFromFrame(reply)
 		if err != nil {
 			return fmt.Errorf("failed to parse ARP reply: %w", err)
 		}
@@ -104,31 +97,16 @@ func TraceArp(opts ArpTraceOpts) error {
 	})
 }
 
-func buildArpRequest(mac net.HardwareAddr, sender4, target4 net.IP) *layers.ARP {
-	srcIP := make(net.IP, 4)
-	copy(srcIP, sender4)
-	dstIP := make(net.IP, 4)
-	copy(dstIP, target4)
-	dstHW := make(net.HardwareAddr, 6)
-
-	return &layers.ARP{
-		AddrType:          layers.LinkTypeEthernet,
-		Protocol:          layers.EthernetTypeIPv4,
-		HwAddressSize:     6,
-		ProtAddressSize:   4,
-		Operation:         layers.ARPRequest,
-		SourceHwAddress:   mac,
-		SourceProtAddress: srcIP,
-		DstHwAddress:      dstHW,
-		DstProtAddress:    dstIP,
+func parseArpFromFrame(frame []byte) (*layers.ARP, error) {
+	p, err := packet.ParseFrame(frame)
+	if err != nil {
+		return nil, err
 	}
-}
-func parseArpFromEthernet(packet []byte) (*layers.ARP, error) {
-	pkt := gopacket.NewPacket(packet, layers.LayerTypeEthernet, gopacket.Default)
-	if arpLayer := pkt.Layer(layers.LayerTypeARP); arpLayer != nil {
-		return arpLayer.(*layers.ARP), nil
+	arp, ok := p.(packet.ArpFrame)
+	if !ok {
+		return nil, fmt.Errorf("no ARP layer in Ethernet frame")
 	}
-	return nil, fmt.Errorf("no ARP layer in Ethernet frame")
+	return arp.ARP, nil
 }
 
 func writeHumanArpRequest(w io.Writer, targetIP, sourceMAC string) {

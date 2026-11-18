@@ -1,12 +1,10 @@
 package trace
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -15,9 +13,9 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/vyasgun/gvprobe/internal/out"
-	"github.com/vyasgun/gvprobe/pkg/constants"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy"
 	"github.com/vyasgun/gvprobe/pkg/gvproxy/datapath"
+	"github.com/vyasgun/gvprobe/pkg/packet"
 )
 
 const dhcpReadTimeout = 3 * time.Second
@@ -121,7 +119,7 @@ func TraceDhcp(opts DhcpTraceOpts) ([]DhcpTraceResult, error) {
 			if err != nil {
 				return fmt.Errorf("failed to build DHCP discover: %w", err)
 			}
-			frame, err := buildEthernetFrame(dhcpMsg)
+			frame, err := packet.BuildDhcpDiscoverFrame(dhcpMsg)
 			if err != nil {
 				return fmt.Errorf("failed to build Ethernet frame: %w", err)
 			}
@@ -162,7 +160,7 @@ func dhcpDiscoverRoundTrip(s datapath.Session, frame []byte, readTimeout time.Du
 	row := DhcpTraceResult{MAC: opts.MAC, Timestamp: time.Now()}
 	var zero dhcpDiscoverOutcome
 
-	foundLease, leaseIP, err := leaseForMAC(opts.MAC)
+	foundLease, leaseIP, err := gvproxy.LeaseForMAC(opts.MAC)
 	if err != nil {
 		return zero, err
 	}
@@ -194,7 +192,7 @@ func dhcpDiscoverRoundTrip(s datapath.Session, frame []byte, readTimeout time.Du
 		return zero, err
 	}
 
-	replyMsg, err := parseDhcpFromEthernet(reply)
+	replyMsg, err := packet.ParseDhcpFromFrame(reply)
 	if err != nil {
 		if opts.Machine {
 			writeDhcpEthernetTrace(w, fmt.Sprintf("inbound L2 frame (run %d)", run), reply)
@@ -238,29 +236,6 @@ func dhcpDiscoverRoundTrip(s datapath.Session, frame []byte, readTimeout time.Du
 	return dhcpDiscoverOutcome{DhcpTraceResult: row, Completed: true}, nil
 }
 
-func leaseForMAC(mac string) (found bool, leaseIP string, err error) {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(constants.LeasesURL)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to get leases: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to read leases: %w", err)
-	}
-	var leases map[string]string
-	if err := json.Unmarshal(body, &leases); err != nil {
-		return false, "", fmt.Errorf("failed to unmarshal leases: %w", err)
-	}
-	for ip, m := range leases {
-		if strings.EqualFold(m, mac) {
-			return true, ip, nil
-		}
-	}
-	return false, "", nil
-}
-
 // writeFinalSummary closes human multi-run output (one informative line).
 func writeFinalSummary(w io.Writer, totalReq, nReused, nNew, nDone int) {
 	out.Fprintln(w)
@@ -286,59 +261,7 @@ func buildDhcpDiscover(mac string) (*dhcpv4.DHCPv4, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid MAC %q: %w", mac, err)
 	}
-	return dhcpv4.New(
-		dhcpv4.WithClientIP(net.IPv4(0, 0, 0, 0).To4()),
-		dhcpv4.WithMessageType(dhcpv4.MessageTypeDiscover),
-		dhcpv4.WithHwAddr(hw),
-		dhcpv4.WithBroadcast(true),
-		dhcpv4.WithOption(dhcpv4.OptParameterRequestList(
-			dhcpv4.OptionSubnetMask,
-			dhcpv4.OptionRouter,
-			dhcpv4.OptionDomainNameServer,
-			dhcpv4.OptionInterfaceMTU,
-		)))
-}
-
-func buildEthernetFrame(dhcpMsg *dhcpv4.DHCPv4) ([]byte, error) {
-	dhcpBytes := dhcpMsg.ToBytes()
-
-	ip4 := &layers.IPv4{
-		Version:  4,
-		TTL:      64,
-		Protocol: layers.IPProtocolUDP,
-		SrcIP:    net.IPv4(0, 0, 0, 0).To4(),
-		DstIP:    net.IPv4(255, 255, 255, 255).To4(),
-	}
-
-	udp := &layers.UDP{
-		SrcPort: layers.UDPPort(dhcpv4.ClientPort),
-		DstPort: layers.UDPPort(dhcpv4.ServerPort),
-	}
-
-	if err := udp.SetNetworkLayerForChecksum(ip4); err != nil {
-		return nil, fmt.Errorf("failed to set network layer for checksum: %w", err)
-	}
-	eth := &layers.Ethernet{
-		SrcMAC:       dhcpMsg.ClientHWAddr,
-		DstMAC:       layers.EthernetBroadcast,
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
-	if err := gopacket.SerializeLayers(buf, opts, eth, ip4, udp, gopacket.Payload(dhcpBytes)); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func parseDhcpFromEthernet(packet []byte) (*dhcpv4.DHCPv4, error) {
-	pkt := gopacket.NewPacket(packet, layers.LayerTypeEthernet, gopacket.Default)
-	if udpLayer := pkt.Layer(layers.LayerTypeUDP); udpLayer != nil {
-		udp := udpLayer.(*layers.UDP)
-		return dhcpv4.FromBytes(udp.Payload)
-	}
-	return nil, fmt.Errorf("no UDP layer in Ethernet frame")
+	return packet.BuildDhcpDiscover(hw)
 }
 
 func writeDhcpEthernetTrace(w io.Writer, title string, frame []byte) {
@@ -351,7 +274,7 @@ func writeDhcpEthernetTrace(w io.Writer, title string, frame []byte) {
 	}
 	out.Fprintln(w, strings.TrimSpace(pkt.String()))
 
-	if d, err := parseDhcpFromEthernet(frame); err == nil {
+	if d, err := packet.ParseDhcpFromFrame(frame); err == nil {
 		out.Fprintln(w)
 		out.Fprintln(w, d.Summary())
 	}

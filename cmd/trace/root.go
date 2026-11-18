@@ -14,5 +14,6 @@ func NewRootCommand() *cobra.Command {
 	}
 	rootCmd.AddCommand(NewDhcpCommand())
 	rootCmd.AddCommand(NewArpCommand())
+	rootCmd.AddCommand(NewFrameCommand())
 	return rootCmd
 }

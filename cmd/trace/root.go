@@ -15,5 +15,6 @@ func NewRootCommand() *cobra.Command {
 	rootCmd.AddCommand(NewDhcpCommand())
 	rootCmd.AddCommand(NewArpCommand())
 	rootCmd.AddCommand(NewFrameCommand())
+	rootCmd.AddCommand(NewDnsCommand())
 	return rootCmd
 }

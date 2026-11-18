@@ -65,7 +65,7 @@ type DNSMessage struct {
 
 // BuildDNSQuery encodes a recursive query for name/type with a random ID.
 // It returns the ID alongside the wire bytes so the caller can verify the
-// response carries the same ID — a reply with a different ID belongs to
+// response carries the same ID. A reply with a different ID belongs to
 // another exchange and must not be treated as the answer.
 func BuildDNSQuery(q DNSQuestion) (uint16, []byte, error) {
 	if q.Name == "" {
@@ -155,4 +155,12 @@ func convertRRs(rrs []dns.RR) []DNSRecord {
 // DNSTypeString renders a query type for output.
 func DNSTypeString(t DNSType) string {
 	return dns.Type(uint16(t)).String()
+}
+
+// DNSRcodeString renders a response code for output.
+func DNSRcodeString(r uint16) string {
+	if s, ok := dns.RcodeToString[int(r)]; ok {
+		return s
+	}
+	return fmt.Sprintf("RCODE%d", r)
 }
